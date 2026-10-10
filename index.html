@@ -30,7 +30,7 @@ body.has-avatar #log{flex:1}
   <div id="st">ボタンを押しながら話して、離すと返事が来ます</div>
   <div id="row"><input id="txt" placeholder="文字で話しかける"><button class="s" id="send">送る</button><button class="s" id="reset">最初から</button></div>
 </div>
-<script src="/avatar.js"></script>
+<script type="module" src="/avatar.js"></script>
 <script>
 let SID; try{ SID=localStorage.getItem('vc_sid'); if(!SID){ SID=Math.random().toString(36).slice(2,12); localStorage.setItem('vc_sid',SID);} }catch(e){ SID=Math.random().toString(36).slice(2,12); }
 const log=document.getElementById('log'), st=document.getElementById('st'), btn=document.getElementById('talk');
@@ -54,7 +54,9 @@ fetch('/config').then(r=>r.json()).then(c=>{ document.title=c.name+'とお話し
   for(const [k,v] of Object.entries(c.theme||{})) document.documentElement.style.setProperty('--'+k,v);
   SMILE=new RegExp(c.smile_words||'(?!)');
   if(c.avatar){ document.getElementById('stage').style.display='flex'; document.body.classList.add('has-avatar');
-    Avatar.load(document.getElementById('av'),'/avatar/').then(a=>{ av=a; }); } });
+    // avatar.js はモジュールなので、読み込みが終わるのを待ってから出す
+    new Promise(ok=>window.Avatar?ok():addEventListener('avatar-ready',ok,{once:true}))
+      .then(()=>Avatar.load(document.getElementById('av'),'/avatar/')).then(a=>{ av=a; }).catch(e=>{ st.textContent='キャラの絵を出せませんでした: '+e.message; }); } });
 function add(cls,text,t){const d=document.createElement('div');d.className=cls;d.textContent=text;log.appendChild(d);
   if(t){const x=document.createElement('div');x.className='t';x.textContent=Object.entries(t).map(([k,v])=>k+' '+v+'秒').join(' / ');log.appendChild(x);}
   log.scrollTop=log.scrollHeight;}

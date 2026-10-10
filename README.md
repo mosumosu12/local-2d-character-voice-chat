@@ -5,11 +5,12 @@
 
 ```
 あなたのキャラの絵 1枚
-  → パーツに分ける（自動）      → 表情の差分を描く（自動）      → 性格と声を決める
+  → 目と口だけ描き替えた絵を作る（画像生成AI）  → 動くキャラにする（自動）  → 性格と声を決める
   → ブラウザで話しかけると、キャラが口パクしながら声で返事
 ```
 
-- 立ち絵1枚 → パーツ分け（See-through）→ 表情差分（閉じ目・笑い目・開いた口）→ 口パクするキャラ、の作り方と道具つき（[docs/AVATAR.md](docs/AVATAR.md)）
+- 立ち絵1枚を**網目状に変形させて動かす**ので、継ぎ目が出ない。首かしげ・呼吸・髪の揺れ・まばたき・口パク・表情（笑顔/困り/怒り）つき
+- 目と口の位置は、描き替えた絵との違いから**自動で見つける**（座標を測らなくてよい）。作り方と道具つき（[docs/AVATAR.md](docs/AVATAR.md)）
 - 話し終わってから **約1秒で相槌**、**3〜4秒で本返事**の声。声の大きさに合わせて口が動く
 - 声と書き起こしは**自分のPCのGPU**で動く（[speech.cpp](https://github.com/nyosegawa/speech.cpp)）。外に音声を送らない
 - 返事を考えるのは Claude。**Claude のサブスク（Pro/Max）でそのまま動く**。API キーでも可
@@ -20,8 +21,8 @@
 
 https://github.com/mosumosu12/local-2d-character-voice-chat/raw/main/docs/demo.mp4
 
-男性の声で話しかけて、配信で使っているキャラ（ここあ）が口パクしながら声で返事をしています。
-※デモのキャラの絵・モデル・声・設定はこのリポジトリには含まれません（このリポジトリの道具で作るキャラは、立ち絵1枚からのパーツ分けです）。
+男性の声で話しかけて、配信で使っているキャラ（ここあ）が口パクしながら声で返事をしています。このリポジトリの動かし方（1枚絵を変形させる）と同じしくみです。
+※デモのキャラの絵・モデル・声・設定はこのリポジトリには含まれません。
 
 ```
 ブラウザ（押して話す）
@@ -36,7 +37,7 @@ https://github.com/mosumosu12/local-2d-character-voice-chat/raw/main/docs/demo.m
 - speech.cpp を動かすPC（Windows/Linux は Vulkan、Mac は Metal。VRAM 8GB 程度〜）
 - Claude Code（`claude` コマンド）＋ Claude の Pro/Max プラン、または Anthropic の API キー
 - （任意）OpenRouter の API キー：相槌選びが速くなる（1回 約0.003円）
-- キャラの絵を作る時だけ: NVIDIA の GPU（See-through で絵を分ける・SD WebUI / Forge で表情を描く）
+- キャラの絵を作る時だけ: 元の絵を渡して描き替えてもらえる画像生成AI（ChatGPT の画像生成など）・Python の numpy / scipy / Pillow
 - 声を説明文から作る時だけ: [Irodori-TTS](https://github.com/Aratako/Irodori-TTS) を入れた Python 環境（NVIDIA の GPU）
 
 ## 使い方（絵を入れる → 声を決める → 話す）
@@ -64,15 +65,15 @@ API で動かす場合（従量課金）: `export ANTHROPIC_API_KEY=...`
 `characters/sample/` を `characters/<名前>/` にコピーして、立ち絵1枚からキャラの絵を作ります（Live2D 不要）。
 
 ```
-# ① 1枚の絵をパーツに分ける（See-through で分けた結果を、動かせるパーツに組み直す）
-python3 tools/avatar/build_parts.py out/<絵の名前> characters/<名前>/avatar
-# ② 閉じ目・笑い目・開いた口の差分を描いて、気に入った物を登録する（SD WebUI / Forge）
-python3 tools/avatar/make_expressions.py gen out/<絵の名前> characters/<名前>/avatar --prompt "1girl, black hair"
-python3 tools/avatar/make_expressions.py use characters/<名前>/avatar eyes_closed=expr_drafts/eyes_closed_s2.png ...
+# ① 画像生成AIに立ち絵を渡して「目を閉じて口を開けた絵」（と、あれば笑顔・困り顔・怒り顔）を描き替えてもらう
+#    頼み方は docs/AVATAR.md にそのまま使える文があります
+# ② 動くキャラにする（位置合わせ・目と口の位置探し・色味合わせは自動）
+python3 tools/avatar/make_model.py characters/<名前>/avatar \
+    --base 立ち絵.png --blink-mouth 目を閉じて口を開けた絵.png --smile 笑顔.png --troubled 困り顔.png --angry 怒り顔.png
 ```
 
-See-through の入れ方・立ち絵のコツ・表情差分のコツは **[docs/AVATAR.md](docs/AVATAR.md)** にまとめています。
-`characters/<名前>/avatar/` があると、会話画面の上にキャラが出て、口パク・まばたき・呼吸・笑顔をします。
+`characters/<名前>/avatar/check.png` で、見つけた目・口の位置を確かめられます。詳しくは **[docs/AVATAR.md](docs/AVATAR.md)**。
+`characters/<名前>/avatar/model.json` があると、会話画面の上にキャラが出て、口パク・まばたき・呼吸・髪の揺れ・表情の切り替えをします。
 
 ### ステップ2：性格と声を決める
 
@@ -150,7 +151,6 @@ CHARACTER=sample python3 server.py 8960 --https --host 0.0.0.0
 - [Irodori-TTS VoiceDesign](https://huggingface.co/Aratako/Irodori-TTS-500M-v2-VoiceDesign)（説明文から声を作る時だけ・任意）
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)（Apache-2.0）
 - [Jev](https://openrouter.ai/docs/guides/community/jev)（OpenRouter 経由・任意）
-- [See-through](https://github.com/shitagaki-lab/see-through)（Apache-2.0・キャラの絵をパーツに分ける時だけ・任意）
 - Claude（Anthropic）
 
 モデルの重みはこのリポジトリに含まれません。各配布元から取得してください。

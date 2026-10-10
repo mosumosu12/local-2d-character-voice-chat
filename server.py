@@ -208,11 +208,16 @@ class H(BaseHTTPRequestHandler):
         if p in ('/', '/index.html'):
             return self.send(200, (ROOT / 'index.html').read_bytes(), 'text/html; charset=utf-8')
         if p == '/config':
-            cfg = {'name': CHAR['name'], 'theme': CHAR.get('theme', {}), 'avatar': AVATAR_DIR.joinpath('parts.json').exists(),
+            cfg = {'name': CHAR['name'], 'theme': CHAR.get('theme', {}), 'avatar': AVATAR_DIR.joinpath('model.json').exists(),
                    'smile_words': CHAR.get('smile_words', 'えへへ|やった|わぁ|ふふ|あはは|うれし|楽し|好き')}
             return self.send(200, json.dumps(cfg, ensure_ascii=False).encode(), 'application/json')
         if p == '/avatar.js':
             return self.send(200, (ROOT / 'avatar.js').read_bytes(), 'text/javascript; charset=utf-8')
+        if p.startswith('/portrait/') and p.endswith('.js'):      # キャラを動かす仕組み（portrait/ の中だけ）
+            f = (ROOT / 'portrait' / p[len('/portrait/'):]).resolve()
+            if (ROOT / 'portrait').resolve() in f.parents and f.is_file():
+                return self.send(200, f.read_bytes(), 'text/javascript; charset=utf-8')
+            return self.send(404, b'', 'text/plain')
         if p.startswith('/avatar/'):      # キャラの絵（characters/<名前>/avatar/ の中だけ）
             f = (AVATAR_DIR / urllib.parse.unquote(p[len('/avatar/'):])).resolve()
             if AVATAR_DIR.resolve() in f.parents and f.is_file():

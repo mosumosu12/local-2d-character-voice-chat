@@ -1,144 +1,101 @@
 # キャラの絵を出して、口パクさせる
 
-会話画面の上にキャラの絵を出して、**声に合わせて口を動かし、まばたき・呼吸・表情の切り替え**をさせる方法です。
-用意するのは**キャラの立ち絵1枚**だけ。Live2D のモデルは要りません。
+会話画面の上にキャラの絵を出して、**声に合わせて口を動かし、まばたき・呼吸・首かしげ・髪の揺れ・表情（笑顔・困り・怒り）**をさせる方法です。
+用意するのは**キャラの立ち絵1枚**と、それを画像生成AIで少しだけ描き替えた絵です。Live2D のモデルは要りません。
 
 ```
 立ち絵1枚
-  └ ① パーツに分ける（See-through）        → tools/avatar/build_parts.py
-  └ ② 表情の差分を描く（SD WebUI / Forge） → tools/avatar/make_expressions.py
-  └ ③ 会話画面で動かす（avatar.js）         → 置くだけで自動で出る
+  └ ① 目と口だけ描き替えた絵を作る（画像生成AIの「画像の編集」）
+  └ ② model.json を作る（tools/avatar/make_model.py・目と口の位置は自動で見つける）
+  └ ③ 会話画面で動かす（置くだけで自動で出る）
 ```
 
-できあがりは `characters/<名前>/avatar/` に入ります。このフォルダがあると、会話画面に絵が出ます（無ければ今まで通り文字だけ）。
+できあがりは `characters/<名前>/avatar/` に入ります。このフォルダに `model.json` があると、会話画面に絵が出ます（無ければ今まで通り文字だけ）。
+
+## しくみ
+
+絵をパーツに切り分けるのではなく、**1枚の絵を網目状に少しずつ変形させて動かします**（WebGL2）。
+
+- 首かしげ・呼吸・髪の揺れ・胸の揺れ・うなずき … 絵の各所を、ばねの計算で少し遅れて動かす（頭→髪の順に遅れてついてくる）
+- まばたき・口パク … 目と口のところだけ、「目を閉じて口を開けた絵」に差し替える。口は声の大きさに合わせて開き具合を変える
+- 表情 … 目・眉と口のところだけ、笑顔・困り顔・怒り顔の絵に差し替える（切り替えの瞬間に一瞬まばたきを挟んで目立たなくする）
+
+切り分けないので、**止まっている時の見た目は元の絵そのもの**で、継ぎ目も出ません。
 
 ---
 
-## ① 1枚の絵をパーツに分ける
+## ① 目と口だけ描き替えた絵を作る
 
-[See-through](https://github.com/shitagaki-lab/see-through)（Apache-2.0）を使います。
-1枚の絵を、顔・目・口・眉・前髪・後ろ髪・体・腕…のレイヤーに分けて、**ほかのパーツに隠れていた所まで描き足してくれる**ツールです。
-（自分で切り抜くと、動かした時に隙間や継ぎ目が出ます。描き足しがあるので、頭を傾けても後ろが欠けません）
+画像生成AIの「画像の編集」（ChatGPT の画像生成など、元の絵を渡して描き替えてもらえる物）に、立ち絵を渡して次のように頼みます。
+**必須なのは1枚目だけ**。表情の絵は無ければその表情が出ないだけです。
 
-### 1-1. See-through を動かす
-
-See-through の README に従って入れて、立ち絵を分けます（NVIDIA の GPU が必要。目安: RTX 4070 Ti で1枚20分ほど・初回はモデルのダウンロード 14GB）。
-
-```
-python inference/scripts/inference_psd.py --srcp input/my_chara.png --save_to_psd --group_offload --save_dir out
-```
-
-`out/<絵の名前>/` に `src_img.png`（元絵を正方形にした物）と、`face.png` `front hair.png` などのレイヤーができます。
-
-> 立ち絵のコツ: 正面向き・腕を体から少し離す・手を組まない・シンプルな背景。
-> 腕が体に重なっていると、腕と服が同じレイヤーに入りやすくなります。
-
-### 1-2. 会話画面用のパーツにする
-
-```
-python3 tools/avatar/build_parts.py out/<絵の名前> characters/<名前>/avatar
-```
-
-- **止まっている時の見た目が元絵と完全に同じ**になるように、各画素を一番手前のパーツに持たせ直します
-  （See-through が描き足した絵は、手前のパーツに隠れていた所にだけ残ります＝動かした時にだけ見える）
-- 両腕は左右に分けます（See-through は1枚にまとめるため）
-- 頭・肩・腰の回転の中心は、パーツの位置から自動で決めます
-- 頬の赤みを塗ってよい所（頬のあたりの肌色だけ）を `blushmask.png` にします
-- 最後に、全部重ねた絵と元絵がどれだけ違うかを表示します（ほぼ 0 なら成功）
-
-> 前髪のレイヤーは顔全体にうっすら乗っていることが多いので、前髪には「濃い所」しか持たせていません。
-> そうしないと、目を閉じた差分に替えても前髪の中に開いた目が残ります。
-
----
-
-## ② 表情の差分を作って載せる
-
-閉じ目・笑い目・開いた口は、**元の目や口を押しつぶしたり動かしたりして作らない**のがコツです。
-押しつぶして閉じ目にすると、左右で高さがずれたり、半目になったり、口が歪んだりします。
-**目・口のところだけ画像生成AIで描き直した「差分の絵」に差し替えます。** Live2D でも、表情は描いた差分に切り替えるのが普通です。
-
-### 2-1. 候補を作る
-
-SD WebUI か Forge を `--api` 付きで起動しておき、
-
-```
-python3 tools/avatar/make_expressions.py gen out/<絵の名前> characters/<名前>/avatar \
-    --api http://127.0.0.1:7860 --prompt "1girl, black hair" --seeds 1 2 3
-```
-
-- 目・口の範囲は、①で作ったパーツの位置から自動で決まります（左右の目は別々の楕円・鼻筋は描き直さない）
-- マスクの中だけ描き直すので、**外側は元絵と1画素も変わりません**。だから差し替えても継ぎ目が出ません
-- `characters/<名前>/avatar/expr_drafts/` に `eyes_closed_s1.png` `eyes_happy_s2.png` `mouth_open_s3.png` などができます
-
-> ⚠ プロンプトに「ぱっちりした目（big eyes / cute eyes など）」のような**開いた目を呼ぶ言葉**を入れると、
-> 閉じ目を描かせても開いたままになります。目と口の小さな範囲だけ描き直すので、キャラの見た目は周りの絵から引き継がれます。
-> 外見の指定は髪の色くらいで十分です。打ち消しの言葉を足すより、開いた目を呼ぶ言葉を消す方が確実です。
-
-### 2-2. 気に入った物を登録する
-
-```
-python3 tools/avatar/make_expressions.py use characters/<名前>/avatar \
-    eyes_closed=expr_drafts/eyes_closed_s2.png eyes_happy=expr_drafts/eyes_happy_s1.png mouth_open=expr_drafts/mouth_open_s3.png
-```
-
-描き直した楕円の少し内側だけを、ふちをぼかして切り出し、パーツとして登録します。
-
-| 名前 | いつ使うか |
+| 作る絵 | 頼み方（英語の方が位置がずれにくい） |
 |---|---|
-| `eyes_closed` | まばたき（2.5〜5.5秒ごとに、0.14秒だけ） |
-| `eyes_happy` | 笑顔の時（相槌や返事に「えへへ」「やった」「好き」などが入っている間） |
-| `mouth_open` | 口パク（声が一定より大きい間） |
+| 目を閉じて口を開けた絵（必須） | `Edit this exact image. Change ONLY her eyes and mouth: both eyes gently closed exactly where they are now, and the mouth open in a small natural talking shape at the same place. Eyebrows unchanged. Keep EVERY other pixel identical: same pose, same hair, same clothes, same position and size, same framing, same canvas size, same plain white background. No zoom, no crop, no redesign.` |
+| 笑顔 | `... Change ONLY her eyes and mouth: joyful closed crescent smiling eyes (^ ^) and a happy small open-mouth smile, at the same positions. Eyebrows relaxed. ...` |
+| 困り顔 | `... Change ONLY her eyebrows, eyes and mouth: worried troubled eyebrows raised in the middle, slightly anxious open eyes, and a small closed wavy worried mouth, at the same positions. ...` |
+| 怒り顔 | `... Change ONLY her eyebrows, eyes and mouth: angry eyebrows slanted down toward the center, sharp annoyed open eyes, and a closed pouting frown mouth, at the same positions. ...` |
 
-笑顔にする言葉は `character.json` の `"smile_words"` で変えられます（例 `"えへへ|やった|わぁ|ふふ"`）。
+（`...` の所は1枚目と同じ「Keep EVERY other pixel identical ～」を付けます）
 
----
+> 立ち絵のコツ: 正面向き・顔がはっきり見える・背景は白などの単色（透明でも可）。
+> 頭の上から足元まで入っている必要はありません。上半身だけでも動きます。
 
-## ③ 口パク（リップシンク）のしくみ
+> AIは頼んだ所以外も少し描き直したり、少し拡大したり、全体の色味を変えたりします。
+> ②の道具が**位置・大きさ・色味を元の絵に合わせ直す**ので、多少のずれは気にしなくて大丈夫です。
+> ただし、顔の向きや髪型が変わってしまった絵は使えません。何回か作って、元の絵に一番近い物を選んでください。
 
-**音の大きさで口を開け閉めする**だけです。音素（あ・い・う…）の解析はしません。
-配信のアバター（VTube Studio など）でもよく使われるやり方で、会話ならこれで十分自然に見えます。
+## ② model.json を作る
 
 ```
-声を鳴らす <audio> ──→ WebAudio の AnalyserNode
-                         └ 30回/秒、波形の RMS（音の大きさ）を測る
-                         └ 口の開き = min(1, RMS × 5)
-avatar.js
-  └ 口の開きを少しなめらかにして、0.18 を超えたら「開いた口」の差分に差し替える
+python3 tools/avatar/make_model.py characters/<名前>/avatar \
+    --base 立ち絵.png --blink-mouth 目を閉じて口を開けた絵.png \
+    --smile 笑顔.png --troubled 困り顔.png --angry 怒り顔.png
 ```
 
-- 倍率 `× 5` と しきい値 `0.18` は、`index.html` と `avatar.js` の中で変えられます。声が小さいキャラは倍率を上げます
-- 声と同じ `<audio>` から測るので、**口と声がずれません**（別に解析すると、再生の遅れの分だけずれます）
-- iPhone は、画面を1回タップしないと音も測定も始まりません（ブラウザの決まり）。最初のタップで準備しています
+- 背景が単色なら自動で透明にします
+- 描き替えた絵を、元の絵に重なる位置・大きさに合わせ直します（拡大・ずれを自動で直す）
+- **目と口の位置は、元の絵と「目を閉じて口を開けた絵」の違う所から自動で見つけます**（人が座標を測る必要はありません）
+- 首の回転の中心・呼吸で動く範囲・髪が揺れる範囲は、見つけた目の位置と大きさから、標準的な立ち絵の比率で決めます
+- 描き替えた絵の色味（明るさ）を、元の絵の肌の色に合わせます
 
-### ほかの動き
+最後に `check.png` ができます。
 
-| 動き | やり方 |
+- 赤い丸 … 見つけた目と口（ここが差し替わる）
+- 緑の丸 … 顔（髪が揺れても顔は動かさない範囲）
+- 青い線 … ここより外側の髪が揺れる
+- 黄色の点 … 首をかしげる時の回転の中心
+
+ずれている時は `model.json` の数値を直します（座標は絵の左上からの px）。
+
+| キー | 中身 |
 |---|---|
-| 呼吸 | 体を上下に 2.4px・胴をほんの少し縦に伸び縮み（1.6 rad/秒） |
-| 頭のゆれ | 首のまんなかを中心に ±0.015 rad。ばねで動かすので止まり際が自然 |
-| 腕 | 呼吸に合わせて肩を中心にほんの少し回す |
-| 頬の赤み | 笑顔の時だけ、頬の肌色の所に半透明のピンクを重ねる（笑い目の差分に赤みが描いてある時は重ねない） |
+| `eyeL` `eyeR` `mouthRegion` | 目・口の範囲 `[中心x, 中心y, 横の半径, 縦の半径]` |
+| `headPivot` | 首をかしげる時の回転の中心 `[x, y]` |
+| `naturalMotion.left/right` | 揺れる髪 `[上端y, 下端y, 上端での内側のx, 下端での内側のx, ぼかし幅, 強さ]` |
+| `naturalMotion.faceProtect` | 髪を揺らしても動かさない顔の範囲 |
+| `breathing` | 呼吸（首・肩・胸の高さと、動く量） |
+| `expressions` | 表情の絵と、表情の時に差し替える目（眉まで含めて少し広め）・口の範囲 |
 
-全部 `avatar.js` の中にあります（80行ほど・ライブラリなし）。
+## ③ 会話画面で動かす
 
----
+`characters/<名前>/avatar/model.json` があれば、会話画面に自動で出ます。
 
-## ファイルの形（parts.json）
+- 声の大きさに合わせて口が開く（返事の声も相槌の声も）
+- 返事の文に `character.json` の `smile_words`（例 `えへへ|やった|うれし`）が入っていると、笑顔で話す
+- まばたき・呼吸・髪の揺れは、ずっと自動で動く
 
-```json
-{
-  "W": 1280, "H": 1280,
-  "order": ["back hair", "...", "front hair"],          // 奥 → 手前
-  "parts": { "face": {"x": 616, "y": 67, "w": 247, "h": 296}, ... },   // parts/<名前>.png の置き場所
-  "pivots": { "head": [x, y], "waist": [x, y], "sh_l": [x, y], "sh_r": [x, y] },
-  "blush": { "x": ..., "y": ..., "w": ..., "h": ..., "cheeks": [[x, y], [x, y]] },
-  "expr": { "eyes_closed": {...}, "eyes_happy": {...}, "mouth_open": {...} }
-}
+ほかのページで使う時は:
+
+```html
+<canvas id="av"></canvas>
+<script type="module">
+  import '/avatar.js';
+  const av = await Avatar.load(document.getElementById('av'), '/avatar/');
+  av.mouth = 0.6;          // 0〜1（声の大きさ）
+  av.mood = 'smile';       // 'neutral' | 'smile' | 'troubled' | 'angry'
+  av.nod();                // うなずく
+</script>
 ```
 
-頭の中心がずれて首が不自然に回る時は、`pivots.head` を手で直してください。
-
-## 注意
-
-- 他の人が描いた絵を使う時は、**動かしてよいか・AIで描き直してよいか**の許可を取ってください
-- 表情の差分を作る時に使うモデルにも、それぞれ利用条件があります
+WebGL2 が使えるブラウザが必要です（今のパソコン・スマホのブラウザならほぼ使えます）。

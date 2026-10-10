@@ -1,76 +1,48 @@
-// パーツ分けしたキャラを canvas で動かす（呼吸・まばたき・頭の揺れ・口パク・表情差分）。
-// parts.json は tools/avatar/build_parts.py が作る。表情差分は tools/avatar/make_expressions.py で載せる。
+// 会話画面のキャラ（1枚絵を変形させて動かす 2.5D）。描画と動きは portrait/ の中。
+// キャラは characters/<名前>/avatar/model.json と画像（tools/avatar/make_model.py が作る）。
 //   const av = await Avatar.load(canvas, '/avatar/');
-//   av.mouth = 0..1（声の大きさ）   av.mood = 'smile' | 'neutral'
-const Avatar = {
-  async load(cv, base) {
-    const P = await (await fetch(base + 'parts.json', { cache: 'no-store' })).json();
-    const img = {};
-    const loadImg = (k, src) => new Promise(ok => { const i = new Image(); i.onload = ok; i.onerror = ok; i.src = src; img[k] = i; });
-    await Promise.all([...P.order.map(n => loadImg(n, base + 'parts/' + encodeURIComponent(n) + '.png')),
-      ...Object.keys(P.expr || {}).map(k => loadImg(k, base + 'parts/' + k + '.png')),
-      P.blush ? loadImg('__blush', base + 'blushmask.png') : null]);
-    cv.width = P.W; cv.height = P.H;
-    const g = cv.getContext('2d'), PV = P.pivots, EX = P.expr || {};
-    const HEAD = new Set(['rest_head', 'ears', 'earwear', 'face', 'mouth', 'eyewhite', 'irides', 'eyelash', 'eyebrow', 'eyewear', 'front hair', 'headwear', 'back hair', 'tail']);
-    const EYE = new Set(['eyewhite', 'irides', 'eyelash']);
-    const faceCv = document.createElement('canvas');
-    const st = { t: 0, headA: 0, headV: 0, nod: 0, nodV: 0, blinkAt: 2, blinkStart: -9, blush: 0, mouthS: 0 };
-    const av = { mouth: 0, mood: 'neutral', nod() { st.nodV -= 0.04; } };
-    const spring = (x, v, tg, k, d, dt) => { v += (-k * (x - tg) - d * v) * dt; return [x + v * dt, v]; };
-    const rot = (c, a) => { g.translate(c[0], c[1]); g.rotate(a); g.translate(-c[0], -c[1]); };
-    const put = (n) => { const q = P.parts[n]; g.drawImage(img[n], q.x, q.y); };
-    const putEx = (k) => { const q = EX[k]; g.drawImage(img[k], q.x, q.y); };
-    let prev = performance.now();
-    function loop(now) {
-      const dt = Math.min(0.05, (now - prev) / 1000); prev = now; st.t += dt; const t = st.t;
-      const smile = av.mood === 'smile';
-      [st.headA, st.headV] = spring(st.headA, st.headV, Math.sin(t * 0.7) * 0.015 + (smile ? 0.03 : 0), 30, 6, dt);
-      [st.nod, st.nodV] = spring(st.nod, st.nodV, 0, 25, 6, dt);
-      st.blush += ((smile ? 1 : 0) - st.blush) * dt * 2;
-      // 口：声の大きさを少しなめらかにして、ある程度以上で「開いた口」の差分に差し替える
-      st.mouthS += (av.mouth - st.mouthS) * Math.min(1, dt * 25);
-      if (t >= st.blinkAt) { st.blinkStart = t; st.blinkAt = t + 2.5 + Math.random() * 3; }
-      const blink = Math.abs(t - st.blinkStart - 0.07) < 0.07;
-      const breath = Math.sin(t * 1.6), bodyY = breath * 2.4, armA = breath * 0.012;
-      g.clearRect(0, 0, P.W, P.H);
-      const headTf = () => { g.translate(0, bodyY + st.nod * 32); rot(PV.head, st.headA); };
-      let eyesDone = false;
-      for (const n of P.order) {
-        g.save();
-        if (n === 'arm_l') { g.translate(0, bodyY); rot(PV.sh_l, armA); put(n); }
-        else if (n === 'arm_r') { g.translate(0, bodyY); rot(PV.sh_r, -armA); put(n); }
-        else if (n === 'neck' || n === 'topwear' || n === 'neckwear' || n === 'rest') {
-          g.translate(0, bodyY); g.translate(PV.waist[0], PV.waist[1]); g.scale(1, 1 + breath * 0.004); g.translate(-PV.waist[0], -PV.waist[1]); put(n);
-        }
-        else if (n === 'face') {
-          headTf(); put(n);
-          // 頬の赤み：元絵で肌色だった所（blushmask）にだけ、ふんわり塗る。笑い目の差分に赤みが描いてある時は足さない
-          if (P.blush && st.blush > 0.02 && !(smile && EX.eyes_happy)) {
-            const q = P.blush; faceCv.width = q.w; faceCv.height = q.h; const f = faceCv.getContext('2d');
-            for (const [cx, cy] of q.cheeks) {
-              const x = cx - q.x, y = cy - q.y, r = q.w * 0.22, gr = f.createRadialGradient(x, y, 0, x, y, r);
-              gr.addColorStop(0, 'rgba(255,111,140,1)'); gr.addColorStop(1, 'rgba(255,111,140,0)'); f.fillStyle = gr; f.beginPath(); f.arc(x, y, r, 0, 7); f.fill();
-            }
-            f.globalCompositeOperation = 'destination-in'; f.drawImage(img.__blush, 0, 0);
-            g.globalAlpha = st.blush * 0.4; g.drawImage(faceCv, q.x, q.y); g.globalAlpha = 1;
-          }
-        }
-        else if (n === 'mouth') { headTf(); if (st.mouthS > 0.18 && EX.mouth_open) putEx('mouth_open'); else put(n); }
-        else if (EYE.has(n)) {
-          if (!eyesDone) {
-            eyesDone = true; headTf();
-            const shut = smile && EX.eyes_happy ? 'eyes_happy' : (blink && EX.eyes_closed ? 'eyes_closed' : null);
-            if (shut) putEx(shut); else { if (P.parts.eyewhite) put('eyewhite'); if (P.parts.irides) put('irides'); if (P.parts.eyelash) put('eyelash'); }
-          }
-        }
-        else if (HEAD.has(n)) { headTf(); put(n); }
-        else put(n);
-        g.restore();
-      }
-      requestAnimationFrame(loop);
-    }
-    requestAnimationFrame(loop);
-    return av;
-  },
-};
+//   av.mouth = 0..1（声の大きさ）   av.mood = 'neutral' | 'smile' | 'troubled' | 'angry'   av.nod()
+import { PortraitRenderer } from '/portrait/renderer.js';
+import { MotionController } from '/portrait/motion.js';
+
+const MOODS = { neutral: [0, 0, 0], smile: [1, 0, 0], troubled: [0, 1, 0], angry: [0, 0, 1] };
+
+async function load(canvas, base) {
+  const cfg = await (await fetch(base + 'model.json', { cache: 'no-store' })).json();
+  // 画像のパスは model.json の場所から見た相対パス
+  const url = (p) => (/^(https?:)?\//.test(p) ? p : base + p);
+  cfg.textures = Object.fromEntries(Object.entries(cfg.textures).map(([k, v]) => [k, url(v)]));
+  if (cfg.expressions?.textures)
+    cfg.expressions.textures = Object.fromEntries(Object.entries(cfg.expressions.textures).map(([k, v]) => [k, url(v)]));
+  canvas.width = cfg.width; canvas.height = cfg.height;
+  const renderer = new PortraitRenderer(canvas, cfg); await renderer.init();
+  const motion = new MotionController();
+  const av = { mouth: 0, mood: 'neutral', nod() { motion.nod(); } };
+  // 表情は 0.18 秒かけて移る。切り替えの瞬間に一瞬まばたきを挟む（差分の入れ替わりを目立たせない）
+  const st = { w: [0, 0, 0], mood: 'neutral', closeAt: -9, lastVoice: -9, rest: cfg.expressions?.smileMouthRest ?? 0.55 };
+  let last = performance.now() / 1000;
+  function frame(ms) {
+    const t = ms / 1000, dt = Math.min(0.05, Math.max(0, t - last)); last = t;
+    if (av.mood !== st.mood) { st.mood = av.mood in MOODS ? av.mood : 'neutral'; st.closeAt = t; }
+    const target = MOODS[st.mood];
+    st.w = st.w.map((v, i) => v + (target[i] - v) * Math.min(1, dt / 0.18));
+    const ct = t - st.closeAt, closure = ct >= 0 && ct < 0.16 ? Math.sin(ct / 0.16 * Math.PI) * 0.9 : 0;
+    // 会話画面の口の値（RMS×5）を、配信モデルの口の値（(RMS-0.008)×12）にそろえる
+    const level = Math.max(0, Math.min(1, (av.mouth / 5 - 0.008) * 12));
+    if (av.mouth > 0.02) st.lastVoice = t;
+    const speaking = t - st.lastVoice < 0.4;
+    const s = motion.update(t, dt, { demo: false, mouth: 0, audioActive: speaking, audioMouth: level, tilt: 0, breathing: 0.5,
+      hair: 0.5, hairGain: cfg.naturalMotion?.defaultHairGain ?? 3, bpm: 180, audioTime: 0, testTilt: null });
+    // 笑顔で話している間は、笑顔の口の「休み開き」を小さくする（開きっぱなしに見えないように）
+    const restT = speaking ? (cfg.expressions?.speechSmileMouthRest ?? st.rest) : (cfg.expressions?.smileMouthRest ?? 0.55);
+    st.rest += (restT - st.rest) * Math.min(1, dt / 0.12);
+    renderer.draw({ ...s, smileRest: st.rest, mouth: s.mouth * (1 - closure), blink: Math.max(s.blink, closure), settle: closure,
+      expressionWeights: st.w }, t);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return av;
+}
+
+window.Avatar = { load };
+window.dispatchEvent(new Event('avatar-ready'));
