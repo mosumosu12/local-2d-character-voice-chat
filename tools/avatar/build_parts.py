@@ -69,6 +69,9 @@ fg = np.stack([L[n][..., 3] for n in order]).max(0) > 24
 rgb = src[..., :3].astype(int)
 not_bg = (src[..., 3] > 24) & ~((rgb > 245).all(2))
 rest = not_bg & ~fg
+# 正方形にする時に足された余白の境目や、レイヤーのふちの1〜2px の線は拾わない（細い線を消す＝縮めてから戻す）
+_r = Image.fromarray((rest * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+rest = np.array(_r) > 127
 if rest.sum() > 200:
     # 首より上は頭と一緒に、下は体と一緒に動かす（リボンの欠けなどが頭から取り残されないように）
     nk = L.get('neck'); nb = bbox(nk) if nk is not None else fb
