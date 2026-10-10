@@ -2,13 +2,15 @@
 
   python3 tools/avatar/make_model.py characters/<名前>/avatar \\
       --base 立ち絵.png --blink-mouth 目を閉じて口を開けた絵.png \\
-      [--smile 笑顔.png] [--troubled 困り顔.png] [--angry 怒り顔.png]
+      [--smile 笑顔.png] [--troubled 困り顔.png] [--angry 怒り顔(口を閉じる).png] [--angry-open 怒り顔(口を開ける).png]
+      [--troubled-blink 困り顔の閉じ目.png] [--angry-blink 怒り顔の閉じ目.png]
 
 描き替えた絵は、画像生成AIの「画像の編集」で作る（頼み方は docs/AVATAR.md）。
 - 描き替えた絵が少しずれたり大きさが違っても、元の絵に重なるように自動で合わせる
 - 目と口の位置は、元の絵と「目を閉じて口を開けた絵」の違う所から自動で見つける（人が座標を測らなくてよい）
 - 首・肩・髪・胸の位置は、見つけた目の位置と大きさから決める（標準的な立ち絵の比率）
-- 確認用に check.png（見つけた目・口・髪の範囲を描いた絵）を出す。ずれていたら model.json の数値を直す
+- 確認用に check.png（見つけた目・口・髪の範囲を描いた絵）と check_dark.png（暗い背景に置いた絵＝白い襟などが抜けていないかを見る）を出す
+- 首・肩・髪・胸の範囲は「目の位置から決めた仮の値」。髪型や体型はキャラごとに違うので、check.png を見て model.json を直す
 """
 import argparse, json, sys
 from pathlib import Path
@@ -133,7 +135,7 @@ def tone_match(base, var, region, features):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('out'); ap.add_argument('--base', required=True); ap.add_argument('--blink-mouth', required=True)
-    for k in ('smile', 'troubled', 'angry'): ap.add_argument('--' + k)
+    for k in ('smile', 'troubled', 'angry', 'angry-open', 'troubled-blink', 'angry-blink'): ap.add_argument('--' + k)
     args = ap.parse_args()
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
     base = cut_background(Image.open(args.base)); W, H = base.size
@@ -167,16 +169,20 @@ def main():
     model['breathing']['anchorY'] = min(H - 1, model['breathing']['anchorY'])
     base.save(out / 'base.png'); blink.putalpha(base.getchannel('A')); blink.save(out / 'blink_mouth.png')
 
-    # 表情（無い物は元の絵＝変化なし）。差分の目は眉まで含めるので、範囲を上に広げる
-    names = {'smile': args.smile, 'troubled': args.troubled, 'angryClosed': args.angry, 'angryOpen': args.angry}
-    tex = {}
-    for name, path in names.items():
-        if not path: tex[name] = 'base.png'; continue
-        fn = ('angry' if name.startswith('angry') else name) + '.png'
-        if not (out / fn).exists() or name != 'angryOpen':
-            v, log[name] = align(base, Image.open(path)); v, log[name]['tone'] = tone_match(base, v, face, feats); v.putalpha(base.getchannel('A')); v.save(out / fn)
-        tex[name] = fn
-    tex['troubledBlink'] = tex['angryBlink'] = 'blink_mouth.png'   # 表情の途中のまばたきは、閉じ目の絵で
+    # 表情（無い物は代わりの絵で埋める）。差分の目は眉まで含めるので、範囲を上に広げる
+    #  困り顔の口は話しても開かない（閉じた Λ のまま）。怒り顔は閉じた口と開いた口を声に合わせて使い分ける
+    #  表情の途中のまばたきは、その表情の閉じ目（無ければ普通の閉じ目＝その間だけ眉が普通に戻る）
+    files = {'smile': args.smile, 'troubled': args.troubled, 'angry': args.angry, 'angry_open': args.angry_open,
+             'troubled_blink': args.troubled_blink, 'angry_blink': args.angry_blink}
+    made = {}
+    for key, path in files.items():
+        if not path: continue
+        v, log[key] = align(base, Image.open(path)); v, log[key]['tone'] = tone_match(base, v, face, feats)
+        v.putalpha(base.getchannel('A')); v.save(out / f'{key}.png'); made[key] = f'{key}.png'
+    pick = lambda *keys: next((made[k] for k in keys if k in made), None)
+    tex = {'smile': pick('smile') or 'base.png', 'troubled': pick('troubled') or 'base.png',
+           'angryClosed': pick('angry', 'angry_open') or 'base.png', 'angryOpen': pick('angry_open', 'angry') or 'base.png',
+           'troubledBlink': pick('troubled_blink') or 'blink_mouth.png', 'angryBlink': pick('angry_blink') or 'blink_mouth.png'}
     ex = lambda e: [e[0], round(e[1] - 10 * s, 1), round(max(e[2], 42 * s), 1), round(max(e[3], 42 * s), 1)]
     model['expressions'] = {'version': 2, 'textureSize': [W, H], 'textures': tex,
                             'eyeL': ex(model['eyeL']), 'eyeR': ex(model['eyeR']), 'mouthRegion': mouth, 'mouthSampleY': model['mouthSampleY'],
@@ -192,9 +198,11 @@ def main():
         y0, y1, xa, xb = model['naturalMotion'][side][:4]; d.line((xa, y0, xb, y1), fill=(0, 90, 255, 255), width=4)
     hx, hy = model['headPivot']; d.ellipse((hx - 8, hy - 8, hx + 8, hy + 8), fill=(255, 210, 0, 255))
     chk.alpha_composite(ov); chk.convert('RGB').save(out / 'check.png')
+    dark = Image.new('RGBA', base.size, (40, 40, 48, 255)); dark.alpha_composite(base); dark.convert('RGB').save(out / 'check_dark.png')
     print(json.dumps({'目と目の間(px)': round(R['cx'] - L['cx'], 1), '左目': model['eyeL'], '右目': model['eyeR'], '口': mouth, '位置合わせ': log},
                      ensure_ascii=False, indent=1))
-    print(f'できました: {out}/model.json  （確認用 {out}/check.png）')
+    print(f'できました: {out}/model.json  （確認用 {out}/check.png ・ 暗い背景 {out}/check_dark.png）')
+    if not made.get('angry_open') and made.get('angry'): print('※ 怒り顔の「口を開けた絵」が無いので、怒り顔で話しても口は閉じたままです（--angry-open）')
 
 
 if __name__ == '__main__':

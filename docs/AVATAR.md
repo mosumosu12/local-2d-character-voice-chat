@@ -18,7 +18,11 @@
 
 - 首かしげ・呼吸・髪の揺れ・胸の揺れ・うなずき … 絵の各所を、ばねの計算で少し遅れて動かす（頭→髪の順に遅れてついてくる）
 - まばたき・口パク … 目と口のところだけ、「目を閉じて口を開けた絵」に差し替える。口は声の大きさに合わせて開き具合を変える
-- 表情 … 目・眉と口のところだけ、笑顔・困り顔・怒り顔の絵に差し替える（切り替えの瞬間に一瞬まばたきを挟んで目立たなくする）
+- 表情 … 目・眉と口のところだけ、笑顔・困り顔・怒り顔の絵に差し替える
+  - 切り替えは、短いまばたきで**目を閉じている間に入れ替える**（0〜0.1秒で閉じる → 0.13秒で入れ替え → 0.16〜0.32秒で開く）。
+    開いた目と閉じた目を混ぜながら移ると、目が二重に見えるため
+  - 笑顔は少し開いた笑い口から、声に合わせてさらに開く。困り顔は閉じた口（Λ）のまま開かない。怒り顔は「閉じた口」と「開いた口」を声に合わせて使い分ける
+- 話し始めに小さくうなずく。首をかしげると、髪が少し遅れてついてきて、ばねのように揺れて止まる
 
 切り分けないので、**止まっている時の見た目は元の絵そのもの**で、継ぎ目も出ません。
 
@@ -34,11 +38,19 @@
 | 目を閉じて口を開けた絵（必須） | `Edit this exact image. Change ONLY her eyes and mouth: both eyes gently closed exactly where they are now, and the mouth open in a small natural talking shape at the same place. Eyebrows unchanged. Keep EVERY other pixel identical: same pose, same hair, same clothes, same position and size, same framing, same canvas size, same plain white background. No zoom, no crop, no redesign.` |
 | 笑顔 | `... Change ONLY her eyes and mouth: joyful closed crescent smiling eyes (^ ^) and a happy small open-mouth smile, at the same positions. Eyebrows relaxed. ...` |
 | 困り顔 | `... Change ONLY her eyebrows, eyes and mouth: worried troubled eyebrows raised in the middle, slightly anxious open eyes, and a small closed wavy worried mouth, at the same positions. ...` |
-| 怒り顔 | `... Change ONLY her eyebrows, eyes and mouth: angry eyebrows slanted down toward the center, sharp annoyed open eyes, and a closed pouting frown mouth, at the same positions. ...` |
+| 怒り顔（口を閉じる） | `... Change ONLY her eyebrows, eyes and mouth: angry eyebrows slanted down toward the center, sharp annoyed open eyes, and a closed pouting frown mouth, at the same positions. ...` |
+| 怒り顔（口を開ける） | `... Change ONLY her eyebrows, eyes and mouth: angry eyebrows slanted down toward the center, sharp annoyed open eyes, and the mouth open while angrily talking (not a smile), at the same positions. ...` |
+| 困り顔の閉じ目 | `... Change ONLY her eyebrows, eyes and mouth: worried troubled eyebrows raised in the middle, both eyes gently closed, and a small closed wavy worried mouth, at the same positions. ...` |
+| 怒り顔の閉じ目 | `... Change ONLY her eyebrows, eyes and mouth: angry eyebrows slanted down toward the center, both eyes closed in annoyance, and a closed pouting frown mouth, at the same positions. ...` |
 
 （`...` の所は1枚目と同じ「Keep EVERY other pixel identical ～」を付けます）
 
-> 立ち絵のコツ: 正面向き・顔がはっきり見える・背景は白などの単色（透明でも可）。
+- 困り顔の口は**閉じた口**に、怒り顔の口は**笑い口にしない**ように頼みます（笑い口が混ざると苦笑いに見えます）
+- 怒り顔の「口を開ける」が無いと、怒り顔で話しても口は閉じたままです
+- 表情の閉じ目が無いと、その表情の途中のまばたきで、一瞬だけ眉が普通の形に戻ります
+
+> 立ち絵のコツ: 正面向き・顔がはっきり見える・背景は透明か単色。
+> **白い襟・レース・白い服のキャラは、背景を透明にした絵を使ってください**（白い背景を抜く時に、背景とつながった白い服まで抜けることがあります）。
 > 頭の上から足元まで入っている必要はありません。上半身だけでも動きます。
 
 > AIは頼んだ所以外も少し描き直したり、少し拡大したり、全体の色味を変えたりします。
@@ -50,16 +62,18 @@
 ```
 python3 tools/avatar/make_model.py characters/<名前>/avatar \
     --base 立ち絵.png --blink-mouth 目を閉じて口を開けた絵.png \
-    --smile 笑顔.png --troubled 困り顔.png --angry 怒り顔.png
+    --smile 笑顔.png --troubled 困り顔.png --angry 怒り顔.png --angry-open 怒り顔_口を開ける.png \
+    --troubled-blink 困り顔の閉じ目.png --angry-blink 怒り顔の閉じ目.png
 ```
 
 - 背景が単色なら自動で透明にします
 - 描き替えた絵を、元の絵に重なる位置・大きさに合わせ直します（拡大・ずれを自動で直す）
 - **目と口の位置は、元の絵と「目を閉じて口を開けた絵」の違う所から自動で見つけます**（人が座標を測る必要はありません）
-- 首の回転の中心・呼吸で動く範囲・髪が揺れる範囲は、見つけた目の位置と大きさから、標準的な立ち絵の比率で決めます
+- 首の回転の中心・呼吸で動く範囲・髪が揺れる範囲は、見つけた目の位置と大きさから、標準的な立ち絵の比率で決めます。
+  **これは仮の値です。** 髪型（長い髪・短い髪・片側だけのポニーテール）や体型で合う範囲が違うので、③で動かして確かめて、合わなければ直してください
 - 描き替えた絵の色味（明るさ）を、元の絵の肌の色に合わせます
 
-最後に `check.png` ができます。
+最後に `check.png` と `check_dark.png`（暗い背景に置いた絵。白い服や髪の先が抜けていないかを見る）ができます。
 
 - 赤い丸 … 見つけた目と口（ここが差し替わる）
 - 緑の丸 … 顔（髪が揺れても顔は動かさない範囲）
@@ -67,6 +81,14 @@ python3 tools/avatar/make_model.py characters/<名前>/avatar \
 - 黄色の点 … 首をかしげる時の回転の中心
 
 ずれている時は `model.json` の数値を直します（座標は絵の左上からの px）。
+
+| 見え方 | 直す所 |
+|---|---|
+| 口を開くと鼻の下に線が出る | `mouthSampleY`（口の絵を読み取る上下の範囲）の上側を下げる |
+| 閉じる途中の口が歪む | `mouthCornerX`（口角のx）と `mouthClosure`（閉じた口の左右の高さ・曲がり） |
+| 髪を揺らすと服や顔まで動く | `naturalMotion.left/right` の内側のxを外へ・`faceProtect` を広げる |
+| 首をかしげると首だけ伸びる | `headPivot` を首の付け根あたりへ |
+| 服の白い所が欠ける | 背景を透明にした立ち絵を使う |
 
 | キー | 中身 |
 |---|---|
@@ -83,6 +105,7 @@ python3 tools/avatar/make_model.py characters/<名前>/avatar \
 
 - 声の大きさに合わせて口が開く（返事の声も相槌の声も）
 - 返事の文に `character.json` の `smile_words`（例 `えへへ|やった|うれし`）が入っていると、笑顔で話す
+- 確かめる順番: 通常の顔 → まばたき → 口（閉じ・少し・大きく・閉じる途中）→ 表情ごとのまばたきと口 → 首かしげと髪
 - まばたき・呼吸・髪の揺れは、ずっと自動で動く
 
 ほかのページで使う時は:
