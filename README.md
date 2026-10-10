@@ -1,7 +1,13 @@
-# 2Dのキャラと声でおしゃべり（立ち絵1枚・ローカルGPU + Claude）
+# 1枚絵だけで、あなたのオリジナルキャラとリアルタイムで会話
 
-**立ち絵1枚から作った2Dのキャラ**が、画面の中で**口パク・まばたき・表情を変えながら、自分の声で**返事をする会話アプリです。
-Live2D のモデルは要りません。
+**キャラの絵が1枚あれば、そのキャラとリアルタイムで声で会話できます。**
+画面の中のキャラが、口パク・まばたき・表情を変えながら、自分の声で返事をします。Live2D のモデルは要りません。
+
+```
+あなたのキャラの絵 1枚
+  → パーツに分ける（自動）      → 表情の差分を描く（自動）      → 性格と声を決める
+  → ブラウザで話しかけると、キャラが口パクしながら声で返事
+```
 
 - 立ち絵1枚 → パーツ分け（See-through）→ 表情差分（閉じ目・笑い目・開いた口）→ 口パクするキャラ、の作り方と道具つき（[docs/AVATAR.md](docs/AVATAR.md)）
 - 話し終わってから **約1秒で相槌**、**3〜4秒で本返事**の声。声の大きさに合わせて口が動く
@@ -30,26 +36,16 @@ https://github.com/mosumosu12/local-2d-character-voice-chat/raw/main/docs/demo.m
 - speech.cpp を動かすPC（Windows/Linux は Vulkan、Mac は Metal。VRAM 8GB 程度〜）
 - Claude Code（`claude` コマンド）＋ Claude の Pro/Max プラン、または Anthropic の API キー
 - （任意）OpenRouter の API キー：相槌選びが速くなる（1回 約0.003円）
+- キャラの絵を作る時だけ: NVIDIA の GPU（See-through で絵を分ける・SD WebUI / Forge で表情を描く）
+- 声を説明文から作る時だけ: [Irodori-TTS](https://github.com/Aratako/Irodori-TTS) を入れた Python 環境（NVIDIA の GPU）
 
-## 使い方
+## 使い方（絵を入れる → 声を決める → 話す）
 
-### 1. 声と書き起こしのサーバー（speech.cpp）を立てる
+### 準備：声と書き起こしのサーバー（speech.cpp）
 
-[speech.cpp のリリース](https://github.com/nyosegawa/speech.cpp/releases) から自分のPC用を落として、キャラの**参照声**（10秒前後の wav）を用意して起動します。
+[speech.cpp のリリース](https://github.com/nyosegawa/speech.cpp/releases) から自分のPC用を落としておきます（起動はステップ2で声を決めてから）。
 
-```
-speech serve irodori-tts-mf qwen3-asr-1.7b --host 0.0.0.0 --port 8955 --add-voice hiyori=./hiyori_ref.wav
-```
-
-`--add-voice` の名前（ここでは `hiyori`）を `character.json` の `"voice"` に書きます。
-（`--port` を付けないと speech.cpp は 8080 で待ち受けます。このアプリの既定は 8955 なので、上のように指定してください）
-
-モデル名は `curl http://<speech.cppのPC>:8955/v1/models` で出てくる名前と合わせます。違っていたら環境変数 `ASR_MODEL` / `TTS_MODEL` で直します。
-
-> ⚠ **参照声は、自分の声か、使ってよいと許可を得た声だけ**にしてください。
-> Irodori-TTS のモデルカードでは、本人の同意なく実在の人（声優・有名人など）の声をまねることは禁止されています。
-
-### 2. 返事役（Claude）のログイン
+#### 返事役（Claude）のログイン
 
 サブスクで動かす場合（自分用に使う時）: **`CLAUDE_CODE_OAUTH_TOKEN` が必須**です。
 普段の Claude Code のログインは使いません（普段の設定や CLAUDE.md が会話に混ざらないよう、空の設定で起動するため）。
@@ -63,19 +59,58 @@ export CLAUDE_CODE_OAUTH_TOKEN=...
 
 API で動かす場合（従量課金）: `export ANTHROPIC_API_KEY=...`
 
-### 3. 相槌の声を作る
+### ステップ1：キャラの絵を入れる
 
-speech.cpp を別のPCで動かしている時は、先に `SPEECH_URL` を設定します（同じPCなら不要）。この設定は手順4でも使います。
-
-```
-export SPEECH_URL=http://<speech.cppのPC>:8955
-CHARACTER=sample python3 make_fillers.py
-```
-
-### 4. 起動
+`characters/sample/` を `characters/<名前>/` にコピーして、立ち絵1枚からキャラの絵を作ります（Live2D 不要）。
 
 ```
-CHARACTER=sample python3 server.py            # → http://localhost:8960/
+# ① 1枚の絵をパーツに分ける（See-through で分けた結果を、動かせるパーツに組み直す）
+python3 tools/avatar/build_parts.py out/<絵の名前> characters/<名前>/avatar
+# ② 閉じ目・笑い目・開いた口の差分を描いて、気に入った物を登録する（SD WebUI / Forge）
+python3 tools/avatar/make_expressions.py gen out/<絵の名前> characters/<名前>/avatar --prompt "1girl, black hair"
+python3 tools/avatar/make_expressions.py use characters/<名前>/avatar eyes_closed=expr_drafts/eyes_closed_s2.png ...
+```
+
+See-through の入れ方・立ち絵のコツ・表情差分のコツは **[docs/AVATAR.md](docs/AVATAR.md)** にまとめています。
+`characters/<名前>/avatar/` があると、会話画面の上にキャラが出て、口パク・まばたき・呼吸・笑顔をします。
+
+### ステップ2：性格と声を決める
+
+**性格**：`characters/<名前>/character.json` の `name` と `system_prompt` を書き換えます。
+相槌（`fillers`）は「いつ使うか（`when`）」を具体的に書くほど外れが減ります。キーは半角の英小文字だけにしてください（例 `ehehe`）。
+
+**声**：次のどちらかで、10秒前後の参照の wav を用意します。
+
+- 自分の声や、使ってよいと許可を得た声を録る
+- **声の録音が無い時は、説明文から作る**（Irodori-TTS の VoiceDesign・NVIDIA の GPU が必要）
+
+  ```
+  python3 tools/make_voice.py --caption "落ち着いた優しい青年の声。中低音でやわらかく、穏やかに話す。" --out voices/<名前>
+  ```
+  候補が6本できるので、聞いて1本選びます。**選んだ1本をずっと使う**のがコツです（説明文から毎回作ると、毎回ちがう声になります）。
+
+> ⚠ **参照声は、自分の声か、使ってよいと許可を得た声、または説明文から作った声だけ**にしてください。
+> Irodori-TTS のモデルカードでは、本人の同意なく実在の人（声優・有名人など）の声をまねることは禁止されています。
+
+声が決まったら speech.cpp を起動します。`--add-voice` の名前を `character.json` の `"voice"` に書きます。
+
+```
+speech serve irodori-tts-mf qwen3-asr-1.7b --host 0.0.0.0 --port 8955 --add-voice <名前>=voices/<名前>/cand_s3.wav
+```
+
+（`--port` を付けないと speech.cpp は 8080 で待ち受けます。モデル名は `curl http://<speech.cppのPC>:8955/v1/models` の名前と合わせ、違えば環境変数 `ASR_MODEL` / `TTS_MODEL` で直します）
+
+最後に、相槌の声をそのキャラの声で作っておきます。
+
+```
+export SPEECH_URL=http://<speech.cppのPC>:8955     # 同じPCなら不要
+CHARACTER=<名前> python3 make_fillers.py
+```
+
+### ステップ3：話す
+
+```
+CHARACTER=<名前> python3 server.py            # → http://localhost:8960/
 ```
 
 既定ではこのPCからしか開けません。スマホから話す時は `--host 0.0.0.0` を付け、ブラウザの決まりで **https も必要**なので、自己署名の証明書を作って `--https` を付けます（初回だけ警告が出ます）。
@@ -87,16 +122,6 @@ CHARACTER=sample python3 server.py 8960 --https --host 0.0.0.0
 
 > ⚠ このサーバーにはパスワード等の認証がありません。**自宅のLANの中だけ**で使い、インターネットに公開しないでください（開けた人が誰でもあなたの Claude と GPU を使えてしまいます）。
 
-## キャラの絵を作る
-
-立ち絵1枚から、**口パク・まばたき・呼吸・表情の切り替え**をするキャラを作れます（Live2D 不要）。
-`characters/<名前>/avatar/` を置くと、会話画面の上にキャラが出ます（置かない時は文字だけの画面になります）。
-
-- 1枚の絵をパーツに分ける（See-through）→ `tools/avatar/build_parts.py`
-- 閉じ目・笑い目・開いた口の差分を描いて載せる（SD WebUI / Forge）→ `tools/avatar/make_expressions.py`
-- 声の大きさで口を動かす（リップシンク）→ `avatar.js`
-
-作り方とコツは **[docs/AVATAR.md](docs/AVATAR.md)** にまとめています。
 
 ## 設定（環境変数）
 
@@ -110,11 +135,6 @@ CHARACTER=sample python3 server.py 8960 --https --host 0.0.0.0
 | `OPENROUTER_API_KEY` | なし | あれば相槌を Jev で選ぶ（0.2〜0.5秒）。無ければ Claude Haiku（約0.9秒） |
 | `ASR_MODEL` / `TTS_MODEL` | `Qwen3-ASR-1.7B` / `Irodori-TTS-v4.1-Small-MF` | speech.cpp のモデル名 |
 
-## 自分のキャラを作る
-
-`characters/sample/` をコピーして、`character.json` の `name` `system_prompt` `voice` `fillers` を書き換えるだけです。
-相槌（`fillers`）は「いつ使うか（`when`）」を具体的に書くほど、外れが減ります。相槌のキーは**半角の英小文字だけ**にしてください（例 `ehehe`）。
-
 ## 作ってみて分かったコツ
 
 - 返事の文は「。」で区切らず「、」でつないで最後だけ「。」にして TTS に渡す（1文ずつ作られて間が空くのを防ぐ）
@@ -127,6 +147,7 @@ CHARACTER=sample python3 server.py 8960 --https --host 0.0.0.0
 
 - [speech.cpp](https://github.com/nyosegawa/speech.cpp)（MIT）
 - [Irodori-TTS](https://huggingface.co/Aratako/Irodori-TTS-v4.1-Small-MF)（MIT＋利用上の注意：本人の同意なく実在人物の声をまねない・誤情報目的のディープフェイクに使わない）
+- [Irodori-TTS VoiceDesign](https://huggingface.co/Aratako/Irodori-TTS-500M-v2-VoiceDesign)（説明文から声を作る時だけ・任意）
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)（Apache-2.0）
 - [Jev](https://openrouter.ai/docs/guides/community/jev)（OpenRouter 経由・任意）
 - [See-through](https://github.com/shitagaki-lab/see-through)（Apache-2.0・キャラの絵をパーツに分ける時だけ・任意）
