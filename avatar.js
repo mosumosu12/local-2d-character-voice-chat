@@ -12,7 +12,7 @@ const Avatar = {
       P.blush ? loadImg('__blush', base + 'blushmask.png') : null]);
     cv.width = P.W; cv.height = P.H;
     const g = cv.getContext('2d'), PV = P.pivots, EX = P.expr || {};
-    const HEAD = new Set(['ears', 'earwear', 'face', 'mouth', 'eyewhite', 'irides', 'eyelash', 'eyebrow', 'eyewear', 'front hair', 'headwear', 'back hair', 'tail']);
+    const HEAD = new Set(['rest_head', 'ears', 'earwear', 'face', 'mouth', 'eyewhite', 'irides', 'eyelash', 'eyebrow', 'eyewear', 'front hair', 'headwear', 'back hair', 'tail']);
     const EYE = new Set(['eyewhite', 'irides', 'eyelash']);
     const faceCv = document.createElement('canvas');
     const st = { t: 0, headA: 0, headV: 0, nod: 0, nodV: 0, blinkAt: 2, blinkStart: -9, blush: 0, mouthS: 0 };
@@ -40,7 +40,7 @@ const Avatar = {
         g.save();
         if (n === 'arm_l') { g.translate(0, bodyY); rot(PV.sh_l, armA); put(n); }
         else if (n === 'arm_r') { g.translate(0, bodyY); rot(PV.sh_r, -armA); put(n); }
-        else if (n === 'neck' || n === 'topwear' || n === 'neckwear') {
+        else if (n === 'neck' || n === 'topwear' || n === 'neckwear' || n === 'rest') {
           g.translate(0, bodyY); g.translate(PV.waist[0], PV.waist[1]); g.scale(1, 1 + breath * 0.004); g.translate(-PV.waist[0], -PV.waist[1]); put(n);
         }
         else if (n === 'face') {

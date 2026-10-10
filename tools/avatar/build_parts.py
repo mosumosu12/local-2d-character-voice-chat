@@ -64,6 +64,25 @@ order = [n for n in ORDER if n in L]
 # 各画素を一番手前のレイヤーに持たせる。縁の半透明を下の層に残すと、動かした時に元絵の線が二重に出る。
 # 前髪は顔全体にうっすら乗るので、前髪だけは濃い所しか持たせない（目を閉じても目が残るのを防ぐ）
 fg = np.stack([L[n][..., 3] for n in order]).max(0) > 24
+# See-through がどのレイヤーにも入れなかった所（スカートが丸ごと抜ける等）を拾う：
+# 元絵で背景（白・透明）でない画素なのに、どのレイヤーにも乗っていない所は「その他」レイヤーにして体と一緒に動かす
+rgb = src[..., :3].astype(int)
+not_bg = (src[..., 3] > 24) & ~((rgb > 245).all(2))
+rest = not_bg & ~fg
+if rest.sum() > 200:
+    # 首より上は頭と一緒に、下は体と一緒に動かす（リボンの欠けなどが頭から取り残されないように）
+    nk = L.get('neck'); nb = bbox(nk) if nk is not None else fb
+    split_y = nb[3] if nk is not None else fb[3]
+    yy_ = np.arange(H)[:, None]
+    for name, m_ in (('rest_head', rest & (yy_ < split_y)), ('rest', rest & (yy_ >= split_y))):
+        if m_.sum() > 50:
+            a = np.zeros_like(src); a[m_] = src[m_]; a[m_, 3] = 255; L[name] = a
+    if 'rest' in L:
+        order.insert(order.index('topwear') if 'topwear' in order else 0, 'rest')
+    if 'rest_head' in L:
+        order.insert(order.index('face') if 'face' in order else len(order), 'rest_head')
+    fg = fg | rest
+    print(f'どのレイヤーにも入っていなかった {int(rest.sum())} 画素を「rest」「rest_head」パーツにしました（首より上は頭と、下は体と一緒に動きます）')
 top = np.full((H, W), -1)
 for i, n in enumerate(order):
     top[L[n][..., 3] > (128 if n == 'front hair' else 24)] = i
