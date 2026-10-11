@@ -18,12 +18,15 @@
 
 > 絵なしで、チャット画面だけで話す版はこちら → [local-voice-character-chat](https://github.com/mosumosu12/local-voice-character-chat)
 
-### デモ（音声あり）
+### デモ（音声あり・約1分40秒）
 
 https://github.com/mosumosu12/local-2d-character-voice-chat/raw/main/docs/demo.mp4
 
-男性の声で話しかけて、配信で使っているキャラ（ここあ）が口パクしながら声で返事をしています。このリポジトリの動かし方（1枚絵を変形させる）と同じしくみです。
-※デモのキャラの絵・モデル・声・設定はこのリポジトリには含まれません。
+**ハンズフリー**（ボタンを押さずに話しかけるだけ）で、男性の声で話しかけて、キャラ（りん）が口パク・笑顔で声で返事をしています。
+キャラは、立ち絵1枚と画像生成AIで描き替えた目・口の絵から、このリポジトリの `tools/avatar/make_model.py` で作ったものです（上半身）。
+※デモのキャラの絵・声・設定はこのリポジトリには含まれません。
+
+> 絵なしで、チャット画面だけで話す版はこちら → [local-voice-character-chat](https://github.com/mosumosu12/local-voice-character-chat)
 
 ```
 ブラウザ（押して話す／ハンズフリー）
