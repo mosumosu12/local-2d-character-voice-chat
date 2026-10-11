@@ -211,6 +211,8 @@ class H(BaseHTTPRequestHandler):
             cfg = {'name': CHAR['name'], 'theme': CHAR.get('theme', {}), 'avatar': AVATAR_DIR.joinpath('model.json').exists(),
                    'smile_words': CHAR.get('smile_words', 'えへへ|やった|わぁ|ふふ|あはは|うれし|楽し|好き')}
             return self.send(200, json.dumps(cfg, ensure_ascii=False).encode(), 'application/json')
+        if p == '/handsfree.js':
+            return self.send(200, (ROOT / 'handsfree.js').read_bytes(), 'text/javascript; charset=utf-8')
         if p == '/avatar.js':
             return self.send(200, (ROOT / 'avatar.js').read_bytes(), 'text/javascript; charset=utf-8')
         if p.startswith('/portrait/') and p.endswith('.js'):      # キャラを動かす仕組み（portrait/ の中だけ）
